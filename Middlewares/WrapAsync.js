@@ -1,6 +1,6 @@
-const wrapAsync = (func) => {
+const WrapAsync = (func) => {
     return function (req, res, next) {
         func(req, res, next).catch((e) => next(e))
     }
 }
-export default wrapAsync;
+export default WrapAsync;
