@@ -17,16 +17,17 @@ const app = express();
 const key = process.env.JWT_SECRET;
 const FRONTEND_URL = process.env.FRONTEND_URL
 app.use(cors({
-  origin: ["http://localhost:5173", FRONTEND_URL],
+  // origin: ["http://localhost:5173", FRONTEND_URL],
+   origin: "*",
   credentials: true
 }));
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json());
 app.use(cookieParser());
-app.use("auth", AuthRoutes);
-app.use("notes", NotesRoutes);
-app.use("users", UserRoutes);
-app.use("admin", AdminRoutes)
+app.use("/auth", AuthRoutes);
+app.use("/notes", NotesRoutes);
+app.use("/users", UserRoutes);
+app.use("/admin", AdminRoutes)
 //health
 app.get("/api/health", (req,res) => {
   res.json({ status: "ok" });
