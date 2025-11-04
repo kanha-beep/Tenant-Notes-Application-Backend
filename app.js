@@ -15,10 +15,10 @@ dotenv.config()
 mongooseConnect();
 const app = express();
 const key = process.env.JWT_SECRET;
-const FRONTEND_URL = process.env.FRONTEND_URL
+const FRONTEND_URL =
+  process.env.FRONTEND_URL || "http://localhost:5173";
 app.use(cors({
-  // origin: ["http://localhost:5173", FRONTEND_URL],
-   origin: "*",
+  origin: FRONTEND_URL,
   credentials: true
 }));
 app.use(express.urlencoded({ extended: true }))
@@ -29,7 +29,7 @@ app.use("/notes", NotesRoutes);
 app.use("/users", UserRoutes);
 app.use("/admin", AdminRoutes)
 //health
-app.get("/api/health", (req,res) => {
+app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 })
 app.use((req, res, next) => {
