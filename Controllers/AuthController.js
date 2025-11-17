@@ -17,7 +17,7 @@ export const registerUser = async (req, res, next) => {
     if (existingUser) return next(new ExpressError(402, "Already Registered"))
     const hashPassword = await bcrypt.hash(password, 10);
     console.log("hash", hashPassword)
-    const user = await User.create({ email, password: hashPassword, tenant:findTenant._id, username, role, password: hashPassword });
+    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role, password: hashPassword });
     console.log("user craeted: ", user)
     res.json({
         _id: user._id,
@@ -26,31 +26,44 @@ export const registerUser = async (req, res, next) => {
         tenant: user.tenant
     })
 }
-//keep it tenant:user.tenant and not tenantId:user.tenant
 const generateToken = (user) => jwt.sign({ _id: user._id, tenant: user.tenant, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1d" })
 export const loginUser = async (req, res, next) => {
-    console.log("login starts")
-    const { email, password, tenant } = req.body;
-    if (!email || !password || !tenant) return next(new ExpressError(400, "Wrong details. Please enter all"))
-    const findTenant = await Tenant.findOne({ name: tenant })
-    if (!findTenant) return next(new ExpressError(403, "No tenant exist found"))
-    const user = await User.findOne({ email, tenant: findTenant._id }).populate('tenant'); // Populate the tenant field
-    if (!user) return next(new ExpressError(400, "Invalid credentials"));
-    if (user.tenant.name !== tenant) return next(new ExpressError(401, "Tenant not matched"))
-    const token = generateToken(user)
-    console.log("login done tenant ", tenant)
-    res.cookie("tokenCookie", token, {
-        httpOnly: true,
-        secure: true,
-        sameSite: "strict",
-        expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7)
-    }).json({
-        _id: user._id,
-        email: user.email,
-        role: user.role,
-        tenant: user.tenant,
-        token
-    });
+    try {
+        console.log("login starts")
+        console.log("Login request body:", req.body);
+        const { email, password, tenant } = req.body;
+        if (!email || !password || !tenant) return next(new ExpressError(400, "Wrong details. Please enter all"))
+        const findTenant = await Tenant.findOne({ name: tenant })
+        console.log("findTenant", findTenant)
+        if (!findTenant) return next(new ExpressError(403, "No tenant exist found"))
+        const user = await User.findOne({ email, tenant: findTenant._id }).populate('tenant');
+        console.log("user found:", user);
+        if (!user) return next(new ExpressError(400, "Invalid credentials"));
+
+        // Validate password
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        console.log("password valid:", isPasswordValid);
+        if (!isPasswordValid) return next(new ExpressError(400, "Invalid credentials"));
+
+        if (user.tenant.name !== tenant) return next(new ExpressError(401, "Tenant not matched"))
+        const token = generateToken(user)
+        console.log("login done tenant ", tenant)
+        res.cookie("tokenCookie", token, {
+            httpOnly: true,
+            secure: false,
+            sameSite: "lax",
+            expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7)
+        }).json({
+            _id: user._id,
+            email: user.email,
+            role: user.role,
+            tenant: user.tenant,
+            token
+        });
+    } catch (error) {
+        console.error("Login error:", error);
+        next(new ExpressError(500, "Login failed: " + error.message));
+    }
 }
 export const currentOwner = async (req, res, next) => {
     const user = await User.findById(req.user._id).populate("tenant", "name");

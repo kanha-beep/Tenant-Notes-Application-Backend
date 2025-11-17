@@ -12,7 +12,7 @@ import UserRoutes from "./Routes/UsersRoute.js";
 import AdminRoutes from "./Routes/AdminRoutes.js"
 import { mongooseConnect } from "./db.js";
 dotenv.config()
-mongooseConnect();
+// mongooseConnect();
 const app = express();
 const key = process.env.JWT_SECRET;
 const FRONTEND_URL =
