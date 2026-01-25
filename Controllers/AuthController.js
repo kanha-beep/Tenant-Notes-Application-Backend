@@ -26,6 +26,8 @@ export const registerUser = async (req, res, next) => {
         tenant: user.tenant
     })
 }
+const isProd = process.env.NODE_ENV === "production";
+
 const generateToken = (user) => jwt.sign({ _id: user._id, tenant: user.tenant, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1d" })
 export const loginUser = async (req, res, next) => {
     try {
@@ -49,8 +51,8 @@ export const loginUser = async (req, res, next) => {
         console.log("login done tenant ", tenant)
         res.cookie("tokenCookie", token, {
             httpOnly: true,
-            secure: false,
-            sameSite: "lax",
+            secure: isProd,
+            sameSite: isProd ? "none" : "lax",
             expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7)
         }).json({
             _id: user._id,
