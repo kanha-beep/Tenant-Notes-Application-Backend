@@ -17,7 +17,7 @@ export const registerUser = async (req, res, next) => {
     if (existingUser) return next(new ExpressError(402, "Already Registered"))
     const hashPassword = await bcrypt.hash(password, 10);
     console.log("hash", hashPassword)
-    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role="user", password: hashPassword });
+    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role:"user", password: hashPassword });
     console.log("user craeted: ", user)
     res.json({
         _id: user._id,
