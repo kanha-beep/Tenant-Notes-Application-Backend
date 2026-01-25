@@ -3,6 +3,7 @@ import Notes from "../Models/NotesSchema.js"
 import Tenant from "../Models/TenantSchema.js";
 const verifyToken = async (req, res, next) => {
     const token = req.cookies.tokenCookie;
+    console.log("cookies:", req.cookies);
     // const auth = req.headers["authorization"]
     // const token = auth && auth.split(" ")[1]
     if (!token) return res.status(401).json("No token provided");
