@@ -9,7 +9,7 @@ export const registerUser = async (req, res, next) => {
     const { error, value } = userValidation.validate(req.body, { context: { isLogin: false } });
     console.log(error)
     if (error) return next(new ExpressError(400, "Please enter full details"));
-    const { email, password, tenant, username, role } = value;
+    const { email, password, tenant, username } = value;
     const findTenant = await Tenant.findOne({ name: tenant })
     if (!findTenant) return next(new ExpressError(403, "No existing Tenant found"))
     // console.log("Found tenant SIGNUP B:", findTenant);
@@ -17,7 +17,7 @@ export const registerUser = async (req, res, next) => {
     if (existingUser) return next(new ExpressError(402, "Already Registered"))
     const hashPassword = await bcrypt.hash(password, 10);
     console.log("hash", hashPassword)
-    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role, password: hashPassword });
+    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role="user", password: hashPassword });
     console.log("user craeted: ", user)
     res.json({
         _id: user._id,
