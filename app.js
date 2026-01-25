@@ -15,12 +15,15 @@ dotenv.config()
 // mongooseConnect();
 const app = express();
 const key = process.env.JWT_SECRET;
-const FRONTEND_URL =
-  process.env.FRONTEND_URL || "http://localhost:5173";
+const allowedOrigins = [
+  "http://localhost:5173",
+  process.env.FRONTEND_URL
+];
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: allowedOrigins,
   credentials: true
 }));
+mongooseConnect()
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json());
 app.use(cookieParser());

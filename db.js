@@ -14,39 +14,42 @@ const tenantData = [
 export const mongooseConnect = async () => {
   try {
     await mongoose.connect(MONGO_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-      serverSelectionTimeoutMS: 5000,
-      socketTimeoutMS: 45000,
+      // useNewUrlParser: true,
+      // useUnifiedTopology: true,
+      // serverSelectionTimeoutMS: 5000,
+      // socketTimeoutMS: 45000,
     });
-    for (const tenant of tenantData) {
-      const existingTenant = await Tenant.findOne({ name: tenant.name });
-      if (!existingTenant) {
-        const newTenant = await Tenant.create(tenant);
-        console.log("Tenant created:", newTenant);
-      } else {
-        console.log("Tenant already exists:", existingTenant.name);
-      }
-    }
-    const ABCD = await Tenant.findOne({ name: "Acme" });
-    const EFGH = await Tenant.findOne({ name: "EFGH" });
+    // console.log("mongoose connected: ", mongoose.connection.host);
+    // for (const tenant of tenantData) {
+    //   const existingTenant = await Tenant.findOne({ name: tenant.name });
+    //   if (!existingTenant) {
+    //     const newTenant = await Tenant.create(tenant);
+    //     console.log("Tenant created:", newTenant);
+    //   } else {
+    //     console.log("Tenant already exists:", existingTenant.name);
+    //   }
+    // }
+    // const ABCD = await Tenant.findOne({ name: "Acme" });
+    // const EFGH = await Tenant.findOne({ name: "EFGH" });
 
-    const testDb = [
-      { username: "adminABCD", email: "admin@ACME.test", password: "password", role: "admin", tenant: ABCD._id },
-      { username: "userABCD", email: "user@ACME.test", password: "password", role: "user", tenant: ABCD._id },
-      { username: "adminEFGH", email: "admin@EFGH.test", password: "password", role: "admin", tenant: EFGH._id },
-      { username: "userEFGH", email: "user@EFGH.test", password: "password", role: "user", tenant: EFGH._id },
-    ];
-    for (const user of testDb) {
-      const existingUser = await User.findOne({ email: user.email, tenant: user.tenant });
-      if (!existingUser) {
-        const hashPassword = await bcrypt.hash(user.password, 10);
-        const newUser = await User.create({ ...user, password: hashPassword });
-        console.log("User created:", newUser);
-      } else {
-        console.log("User already exists:", existingUser.email);
-      }
-    }
+    // const testDb = [
+    //   { username: "adminABCD", email: "admin@ACME.test", password: "password", role: "admin", tenant: ABCD._id },
+    //   { username: "userABCD", email: "user@ACME.test", password: "password", role: "user", tenant: ABCD._id },
+    //   { username: "adminEFGH", email: "admin@EFGH.test", password: "password", role: "admin", tenant: EFGH._id },
+    //   { username: "userEFGH", email: "user@EFGH.test", password: "password", role: "user", tenant: EFGH._id },
+    // ];
+    // for (const user of testDb) {
+    //   const existingUser = await User.findOne({ email: user.email, tenant: user.tenant });
+    //   console.log("user.email: ", existingUser);
+    //   if (!existingUser) {
+    //     const hashPassword = await bcrypt.hash(user.password, 10);
+    //     const newUser = await User.create({ ...user, password: hashPassword });
+    //     console.log("User created:", newUser);
+    //   }
+    //    else {
+    //     console.log("User already exists:", existingUser.email);
+    //   }
+    // }
     console.log("Mongoose connected");
   } catch (e) {
     console.log("Mongoose error: ", e);

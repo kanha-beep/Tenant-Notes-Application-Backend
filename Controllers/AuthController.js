@@ -34,12 +34,11 @@ export const loginUser = async (req, res, next) => {
         const { email, password, tenant } = req.body;
         if (!email || !password || !tenant) return next(new ExpressError(400, "Wrong details. Please enter all"))
         const findTenant = await Tenant.findOne({ name: tenant })
-        console.log("findTenant", findTenant)
+        // console.log("findTenant", findTenant)
         if (!findTenant) return next(new ExpressError(403, "No tenant exist found"))
         const user = await User.findOne({ email, tenant: findTenant._id }).populate('tenant');
-        console.log("user found:", user);
-        if (!user) return next(new ExpressError(400, "Invalid credentials"));
-
+        // console.log("user found:", user);
+        // if (!user) return next(new ExpressError(400, "Invalid credentials"));
         // Validate password
         const isPasswordValid = await bcrypt.compare(password, user.password);
         console.log("password valid:", isPasswordValid);
