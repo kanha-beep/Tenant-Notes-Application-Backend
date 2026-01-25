@@ -47,7 +47,7 @@ export const allNotes = async (req, res, next) => {
     const sortOptions = {};
     if (sortBy === "title") sortOptions.title = 1;
     if (sortBy === "content") sortOptions.content = 1;
-    const finalPagination = await Notes.find({ ...query, tenant: req.user.tenant._id, user: req.user._id }).populate("tenant").sort(sortOptions).skip(skip).limit(limit);
+    const finalPagination = await Notes.find({ ...query, tenant: req.user.tenant._id }).populate("tenant").sort(sortOptions).skip(skip).limit(limit);
     if (!finalPagination) return next(new ExpressError(401, "No notes to show"))
     const totalNotes = await Notes.countDocuments({ ...query, tenant: req.user.tenant._id, user: req.user._id });
     const totalNotesOfCompany = await Notes.countDocuments({ ...query, tenant: req.user.tenant._id });
