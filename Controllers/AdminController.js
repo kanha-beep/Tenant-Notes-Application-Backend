@@ -121,11 +121,13 @@ export const deleteUser = async (req, res, next) => {
 export const dashboard = async (req, res, next) => {
     // console.log("dashboard AdminRoutes: ", req.user)
     const totalNotes = await Notes.countDocuments({ tenant: req.user.tenant._id });
-    console.log("total notes: ", totalNotes)
+    // console.log("total notes: ", totalNotes)
     if (totalNotes < 0) return next(new ExpressError(402, "No user dashboard"))
     const totalUsers = await User.countDocuments({ role: "user", tenant: req.user.tenant._id });
+    const allAdmins = await User.find({ tenant: req?.user?.tenant?._id, role:"admin" })
+    // console.log("all admins: ", allAdmins)
     if (totalUsers < 0) return next(new ExpressError(401, "No total users coming"))
-    res.json({ totalUsers, totalNotes })
+    res.json({ totalUsers, totalNotes, allAdmins })
 }
 export const generateUserReport = async (req, res) => {
 
