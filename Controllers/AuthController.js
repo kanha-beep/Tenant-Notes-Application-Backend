@@ -39,7 +39,7 @@ export const loginUser = async (req, res, next) => {
         // console.log("findTenant", findTenant)
         if (!findTenant) return next(new ExpressError(403, "No tenant exist found"))
         const user = await User.findOne({ email, tenant: findTenant._id }).populate('tenant');
-        console.log("user found:", user);
+        // console.log("user found:", user);
         // if (!user) return next(new ExpressError(400, "Invalid credentials"));
         // Validate password
         const isPasswordValid = await bcrypt.compare(password, user.password);
