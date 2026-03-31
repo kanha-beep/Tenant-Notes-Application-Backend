@@ -59,6 +59,7 @@ export const allUsers = async (req, res, next) => {
     if (sort === "username") sortOptions.username = 1;
     if (sort === "email") sortOptions.email = 1;
     const finalUsers = await User.find({ ...query, role: "user", tenant: req.user.tenant._id }).sort(sortOptions).skip(skip).limit(limit)
+    console.log("all users: ", finalUsers)
     const totalUsers = await User.countDocuments({ ...query, role: "user", tenant: req.user.tenant._id });
     const totalPages = Math.ceil(totalUsers / limit);
     // console.log("now search user is being set", finalUsers, totalUsers, totalPages)

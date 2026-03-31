@@ -1,73 +1,79 @@
 import bcrypt from "bcryptjs";
-// /api/admin
-import { userValidation } from "../Validation/SchemaValidation.js"
-import User from "../Models/UserSchema.js"
-import Tenant from "../Models/TenantSchema.js"
-import ExpressError from "../Middlewares/ExpressError.js"
+import { userValidation } from "../Validation/SchemaValidation.js";
+import User from "../Models/UserSchema.js";
+import Tenant from "../Models/TenantSchema.js";
+import ExpressError from "../Middlewares/ExpressError.js";
 import jwt from "jsonwebtoken";
+
 export const registerUser = async (req, res, next) => {
-    console.log("Register request body:", req.body);
-    const { email, password, username , tenant} = req.body;
-    const findTenant = await Tenant.findOne({ name: tenant })
-    if (!findTenant) return next(new ExpressError(403, "No existing Tenant found"))
-    // console.log("Found tenant SIGNUP B:", findTenant);
-    const existingUser = await User.findOne({ email, tenant: findTenant._id })
-    if (existingUser) return next(new ExpressError(402, "Already Registered"))
-    const hashPassword = await bcrypt.hash(password, 10);
-    console.log("hash", hashPassword)
-    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role: "user", password: hashPassword });
-    console.log("user craeted: ", user)
-    res.json({
-        _id: user._id,
-        email: user.email,
-        role: user.role,
-        tenant: user.tenant
-    })
-}
-const isProd = process.env.NODE_ENV === "production";
+  console.log("Register request body:", req.body);
+  const { email, password, username } = req.body;
+  const tenant = req.body.tenant?.toLowerCase();
+  const findTenant = await Tenant.findOne({ name: tenant });
+  if (!findTenant) return next(new ExpressError(403, "No existing Tenant found"));
+  const existingUser = await User.findOne({ email, tenant: findTenant._id });
+  if (existingUser) return next(new ExpressError(402, "Already Registered"));
+  const hashPassword = await bcrypt.hash(password, 10);
+  const user = await User.create({
+    email,
+    password: hashPassword,
+    tenant: findTenant._id,
+    username,
+    role: "user",
+  });
+  res.json({
+    _id: user._id,
+    email: user.email,
+    role: user.role,
+    tenant: user.tenant,
+  });
+};
 
-const generateToken = (user) => jwt.sign({ _id: user._id, tenant: user.tenant, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1d" })
+const generateToken = (user) =>
+  jwt.sign(
+    { _id: user._id, tenant: user.tenant, role: user.role },
+    process.env.JWT_SECRET,
+    { expiresIn: "1d" }
+  );
+
 export const loginUser = async (req, res, next) => {
-    try {
-        console.log("Login request body:", req.body);
-        const { email, password } = req.body;
-        const tenant = req.body.tenant?.toLowerCase()
-        console.log("tenat name: ", tenant)
-        if (!email || !password || !tenant) return next(new ExpressError(400, "Wrong details. Please enter all"))
-        const findTenant = await Tenant.findOne({ name: tenant })
-        console.log("findTenant", findTenant)
-        if (!findTenant) return next(new ExpressError(403, "No tenant exist found"))
-        const user = await User.findOne({ email, tenant: findTenant._id }).populate('tenant');
-        if (!user) return next(new ExpressError(400, "Invalid credentials"))
-        console.log("user found:", user);
-        // Validate password
-        const isPasswordValid = await bcrypt.compare(password, user.password);
-        console.log("password valid:", isPasswordValid);
-        if (!isPasswordValid) return next(new ExpressError(400, "Invalid credentials"));
-
-        if (user.tenant.name !== tenant) return next(new ExpressError(401, "Tenant not matched"))
-        const token = generateToken(user)
-        console.log("login done tenant ", tenant)
-        res.cookie("tokenCookie", token, {
-            httpOnly: true,
-            secure: isProd,
-            sameSite: isProd ? "none" : "lax",
-            expires: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7)
-        }).json({
-            _id: user._id,
-            email: user.email,
-            role: user.role,
-            tenant: user.tenant,
-            token
-        });
-    } catch (error) {
-        console.error("Login error:", error);
-        next(new ExpressError(500, "Login failed: " + error.message));
+  try {
+    console.log("Login request body:", req.body);
+    const { email, password } = req.body;
+    const tenant = req.body.tenant?.toLowerCase();
+    if (!email || !password || !tenant) {
+      return next(new ExpressError(400, "Wrong details. Please enter all"));
     }
-}
+
+    const findTenant = await Tenant.findOne({ name: tenant });
+    if (!findTenant) return next(new ExpressError(403, "No tenant exist found"));
+
+    const user = await User.findOne({ email, tenant: findTenant._id }).populate("tenant");
+    if (!user) return next(new ExpressError(400, "Invalid credentials"));
+
+    const isPasswordValid = await bcrypt.compare(password, user.password);
+    if (!isPasswordValid) return next(new ExpressError(400, "Invalid credentials"));
+
+    if (user.tenant.name !== tenant) return next(new ExpressError(401, "Tenant not matched"));
+
+    const token = generateToken(user);
+
+    res.json({
+      _id: user._id,
+      email: user.email,
+      role: user.role,
+      tenant: user.tenant,
+      token,
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    next(new ExpressError(500, "Login failed: " + error.message));
+  }
+};
+
 export const currentOwner = async (req, res, next) => {
-    const user = await User.findById(req.user._id).populate("tenant", "name");
-    console.log("current owner NotesAuth: ", user.username)
-    if (!user) return next(new ExpressError(404, "User not found"));
-    res.json(user);
-}
+  const user = await User.findById(req.user._id).populate("tenant", "name");
+  console.log("current owner NotesAuth: ", user.username);
+  if (!user) return next(new ExpressError(404, "User not found"));
+  res.json(user);
+};
