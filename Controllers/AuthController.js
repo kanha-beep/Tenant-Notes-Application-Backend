@@ -6,10 +6,8 @@ import Tenant from "../Models/TenantSchema.js"
 import ExpressError from "../Middlewares/ExpressError.js"
 import jwt from "jsonwebtoken";
 export const registerUser = async (req, res, next) => {
-    const { error, value } = userValidation.validate(req.body, { context: { isLogin: false } });
-    console.log(error)
-    if (error) return next(new ExpressError(400, "Please enter full details"));
-    const { email, password, tenant, username } = value;
+    console.log("Register request body:", req.body);
+    const { email, password, username , tenant} = req.body;
     const findTenant = await Tenant.findOne({ name: tenant })
     if (!findTenant) return next(new ExpressError(403, "No existing Tenant found"))
     // console.log("Found tenant SIGNUP B:", findTenant);
@@ -17,7 +15,7 @@ export const registerUser = async (req, res, next) => {
     if (existingUser) return next(new ExpressError(402, "Already Registered"))
     const hashPassword = await bcrypt.hash(password, 10);
     console.log("hash", hashPassword)
-    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role:"user", password: hashPassword });
+    const user = await User.create({ email, password: hashPassword, tenant: findTenant._id, username, role: "user", password: hashPassword });
     console.log("user craeted: ", user)
     res.json({
         _id: user._id,
@@ -31,16 +29,17 @@ const isProd = process.env.NODE_ENV === "production";
 const generateToken = (user) => jwt.sign({ _id: user._id, tenant: user.tenant, role: user.role }, process.env.JWT_SECRET, { expiresIn: "1d" })
 export const loginUser = async (req, res, next) => {
     try {
-        console.log("login starts")
         console.log("Login request body:", req.body);
-        const { email, password, tenant } = req.body;
+        const { email, password } = req.body;
+        const tenant = req.body.tenant?.toLowerCase()
+        console.log("tenat name: ", tenant)
         if (!email || !password || !tenant) return next(new ExpressError(400, "Wrong details. Please enter all"))
         const findTenant = await Tenant.findOne({ name: tenant })
-        // console.log("findTenant", findTenant)
+        console.log("findTenant", findTenant)
         if (!findTenant) return next(new ExpressError(403, "No tenant exist found"))
         const user = await User.findOne({ email, tenant: findTenant._id }).populate('tenant');
-        // console.log("user found:", user);
-        // if (!user) return next(new ExpressError(400, "Invalid credentials"));
+        if (!user) return next(new ExpressError(400, "Invalid credentials"))
+        console.log("user found:", user);
         // Validate password
         const isPasswordValid = await bcrypt.compare(password, user.password);
         console.log("password valid:", isPasswordValid);
