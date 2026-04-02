@@ -47,7 +47,7 @@ export const newNote = async (req, res, next) => {
     check: false,
     user: existingUser._id,
     tenant: req.user.tenant._id,
-    dueAt,
+    dueAt: null,
     completedAt: null,
     createdAt,
   });
