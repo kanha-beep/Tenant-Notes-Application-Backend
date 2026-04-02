@@ -3,7 +3,7 @@ import Notes from "../Models/NotesSchema.js";
 import User from "../Models/UserSchema.js";
 import ExpressError from "../Middlewares/ExpressError.js";
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_HOUR_MS = 10 * 60 * 60 * 1000;
 
 function prioritizeNotes(notes) {
   const now = Date.now();
@@ -47,7 +47,7 @@ export const newNote = async (req, res, next) => {
     check: false,
     user: existingUser._id,
     tenant: req.user.tenant._id,
-    dueAt: null,
+    dueAt,
     completedAt: null,
     createdAt,
   });
