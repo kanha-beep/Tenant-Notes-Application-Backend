@@ -20,6 +20,7 @@ export const registerUser = async (req, res, next) => {
     tenant: findTenant._id,
     username,
     role: "user",
+    lastSeenAt: new Date(),
   });
   res.json({
     _id: user._id,
@@ -55,6 +56,9 @@ export const loginUser = async (req, res, next) => {
     if (!isPasswordValid) return next(new ExpressError(400, "Invalid credentials"));
 
     if (user.tenant.name !== tenant) return next(new ExpressError(401, "Tenant not matched"));
+
+    user.lastSeenAt = new Date();
+    await user.save();
 
     const token = generateToken(user);
 

@@ -24,6 +24,15 @@ const notesSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    userFeedback: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+    feedbackAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );

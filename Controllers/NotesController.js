@@ -62,8 +62,10 @@ export const notesReport = async (req, res, next) => {
     title: n.title,
     content: n.content,
     check: n.check,
+    userFeedback: n.userFeedback || "",
     deadline: new Date(n.dueAt).toLocaleString(),
     completedAt: n.completedAt ? new Date(n.completedAt).toLocaleString() : "",
+    feedbackAt: n.feedbackAt ? new Date(n.feedbackAt).toLocaleString() : "",
     date: new Date(n.createdAt).toLocaleString(),
   }));
   function csvData(data) {
@@ -134,10 +136,15 @@ export const updateCheck = async (req, res, next) => {
     const { noteId } = req.params;
     const notes = await Notes.findOne({ _id: noteId, tenant: req.user.tenant._id }).populate("tenant", "name").populate("user", "userId");
     if (!notes) return next(ExpressError(401, "No single note found"));
-    const check = req.body.check;
+    const check = Boolean(req.body.check);
+    const trimmedFeedback = typeof req.body.userFeedback === "string"
+      ? req.body.userFeedback.trim()
+      : notes.userFeedback || "";
     const updatePayload = {
       check,
       completedAt: check ? new Date() : null,
+      userFeedback: trimmedFeedback,
+      feedbackAt: trimmedFeedback ? new Date() : null,
     };
     const newNotes = await Notes.findByIdAndUpdate({ _id: noteId }, updatePayload, { new: true })
       .populate("tenant", "name")

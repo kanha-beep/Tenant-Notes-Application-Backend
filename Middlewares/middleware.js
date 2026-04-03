@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import Notes from "../Models/NotesSchema.js";
 import Tenant from "../Models/TenantSchema.js";
+import User from "../Models/UserSchema.js";
 
 const verifyToken = async (req, res, next) => {
   const authHeader = req.headers["authorization"];
@@ -12,9 +13,14 @@ const verifyToken = async (req, res, next) => {
 
   if (!token) return res.status(401).json("No token provided");
 
-  jwt.verify(token, process.env.JWT_SECRET, (error, user) => {
+  jwt.verify(token, process.env.JWT_SECRET, async (error, user) => {
     if (error) return res.status(401).json("Why error in MW");
     req.user = user;
+    try {
+      await User.findByIdAndUpdate(user._id, { lastSeenAt: new Date() });
+    } catch (presenceError) {
+      console.error("Error updating lastSeenAt:", presenceError);
+    }
     next();
   });
 };
