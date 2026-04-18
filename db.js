@@ -14,10 +14,7 @@ const tenantData = [
 export const mongooseConnect = async () => {
   try {
     await mongoose.connect(MONGO_URI, {
-      // useNewUrlParser: true,
-      // useUnifiedTopology: true,
-      // serverSelectionTimeoutMS: 5000,
-      // socketTimeoutMS: 45000,
+      serverSelectionTimeoutMS: 5000,
     });
     // console.log("mongoose connected: ", mongoose.connection.host);
     // for (const tenant of tenantData) {
@@ -51,9 +48,10 @@ export const mongooseConnect = async () => {
     //   }
     // }
     console.log("Mongoose connected");
+    return true;
   } catch (e) {
     console.log("Mongoose error: ", e);
-    process.exit(1); // exit if connection fails
+    return false;
   }
 
   console.log("Test data created");
@@ -65,6 +63,5 @@ export const mongooseConnect = async () => {
 
 
 // // Users to create
-
 
 

@@ -2,8 +2,16 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
+import path from "path";
+import { fileURLToPath } from "url";
 import ExpressError from "./Middlewares/ExpressError.js";
 import AuthRoutes from "./Routes/AuthRoutes.js";
+import {
+  captureStudioNote,
+  getStudioState,
+  toggleFocusItem,
+} from "./studioData.js";
+import { getHomepageData } from "./homepageData.js";
 //notes admin + user
 import NotesRoutes from "./Routes/NotesRoutes.js";
 //user Profile
@@ -12,21 +20,56 @@ import UserRoutes from "./Routes/UsersRoute.js";
 import AdminRoutes from "./Routes/AdminRoutes.js"
 import { mongooseConnect } from "./db.js";
 dotenv.config()
-// mongooseConnect();
 const app = express();
-const key = process.env.JWT_SECRET;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDistPath = path.resolve(__dirname, "../client/dist");
 const allowedOrigins = [
   "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5174",
   process.env.FRONTEND_URL
 ];
-app.use(cors({
-  origin: allowedOrigins,
-  credentials: true
-}));
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error("Origin not allowed by CORS"));
+    },
+    credentials: true
+  })
+);
 mongooseConnect()
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json());
 app.use(cookieParser());
+app.get("/api/homepage", (req, res) => {
+  res.json(getHomepageData());
+});
+app.get("/api/studio", (req, res) => {
+  res.json(getStudioState());
+});
+app.post("/api/studio/capture", (req, res) => {
+  const nextState = captureStudioNote(req.body?.text || "");
+  res.status(201).json(nextState);
+});
+app.patch("/api/studio/focus/:taskId", (req, res, next) => {
+  const existingTask = getStudioState().focus.find(
+    (task) => task.id === req.params.taskId
+  );
+
+  if (!existingTask) {
+    next(new ExpressError(404, "Focus item not found"));
+    return;
+  }
+
+  res.json(toggleFocusItem(req.params.taskId));
+});
 app.use("/auth", AuthRoutes);
 app.use("/notes", NotesRoutes);
 app.use("/users", UserRoutes);
@@ -35,6 +78,10 @@ app.use("/admin", AdminRoutes)
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 })
+app.use(express.static(clientDistPath));
+app.get(/^\/(?!api\/).*/, (req, res) => {
+  res.sendFile(path.join(clientDistPath, "index.html"));
+});
 app.use((req, res, next) => {
   next(new ExpressError(404, "Page not found"));
 });
