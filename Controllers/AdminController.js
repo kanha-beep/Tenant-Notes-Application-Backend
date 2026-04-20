@@ -1,10 +1,23 @@
 // /api/admin
+import bcrypt from "bcryptjs";
 import User from "../Models/UserSchema.js"
 import Notes from "../Models/NotesSchema.js"
 import Tenant from "../Models/TenantSchema.js";
 import ExpressError from "../Middlewares/ExpressError.js"
+
+function escapeCsvValue(value) {
+    const stringValue = value == null ? "" : String(value);
+    if (/["\n,]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+    }
+    return stringValue;
+}
+
+function generateTemporaryPassword() {
+    return Math.random().toString(36).slice(-10);
+}
+
 export const getPlan = async (req, res, next) => {
-    // console.log("plan starts")
     const tenants = await Tenant.findById(req.user.tenant._id);
     if (!tenants) return next(new ExpressError(401, "No tenant adminROute"))
     const plan = tenants.plan;
@@ -15,7 +28,6 @@ export const getPlan = async (req, res, next) => {
 };
 //plan change
 export const buyPlan = async (req, res, next) => {
-    // console.log("tenant id: ", req.user.tenant._id);
     const { amount } = req.body;
     const amtValue = Number(amount)
     const tenants = await Tenant.findById(req.user.tenant._id);
@@ -32,7 +44,7 @@ export const buyPlan = async (req, res, next) => {
         tenants.noteLimit = "3";
         console.log("no change", tenants.plan, tenants.noteLimit)
     }
-    tenants.save();
+    await tenants.save();
     console.log("tenant paid saved AdminRoute: ", tenants);
     res.json(tenants);
 }
@@ -69,18 +81,29 @@ export const allUsers = async (req, res, next) => {
 export const newUser = async (req, res, next) => {
     try {
         console.log("getting user id new: ", req.params)
-        const { username, email, title, content } = req.body;
+        const username = req.body.username?.trim();
+        const email = req.body.email?.trim().toLowerCase();
+        const rawPassword = req.body.password?.trim() || req.body.content?.trim() || req.body.title?.trim();
+        if (!username || !email) {
+            return next(new ExpressError(400, "Username and email are required"));
+        }
+
+        const existingUser = await User.findOne({ email, tenant: req.user.tenant._id });
+        if (existingUser) {
+            return next(new ExpressError(409, "A user with this email already exists"));
+        }
+
+        const temporaryPassword = rawPassword || generateTemporaryPassword();
+        const password = await bcrypt.hash(temporaryPassword, 10);
         const user = await User.create({
             username,
             email,
-            password: "password",
-            title,
-            content,
+            password,
             role: "user",
             tenant: req.user.tenant._id
         });
         console.log("user created AdminRoute: ", user)
-        res.json({ success: true, user });
+        res.status(201).json({ success: true, user, temporaryPassword });
     } catch (error) {
         console.log("Error creating user: ", error);
         next(new ExpressError(500, "Failed to create user"));
@@ -88,21 +111,36 @@ export const newUser = async (req, res, next) => {
 }
 //single user
 export const singleUser = async (req, res, next) => {
-    // console.log("req.params single user AdminRoutes: ", req.params)
     const { userId } = req.params;
-    const users = await User.findById(userId);
+    const users = await User.findOne({ _id: userId, tenant: req.user.tenant._id });
     if (!users) return next(new ExpressError(401, "No user adminRoute"))
-    // console.log("user found AdminRoute: ", users)
     res.json(users);
 
 }
 //users change
 export const updateUser = async (req, res, next) => {
-    // console.log("req.params user Change AdminRoutes: ", req.params)
     const { userId } = req.params;
     console.log("req.body user change AdminRoutes: ", req.body);
     const { username, email, password } = req.body;
-    const users = await User.findByIdAndUpdate(userId, { username, email, password }, { new: true });
+    const updatePayload = {};
+    if (typeof username === "string" && username.trim()) {
+        updatePayload.username = username.trim();
+    }
+    if (typeof email === "string" && email.trim()) {
+        updatePayload.email = email.trim().toLowerCase();
+    }
+    if (typeof password === "string" && password.trim()) {
+        updatePayload.password = await bcrypt.hash(password.trim(), 10);
+    }
+    if (Object.keys(updatePayload).length === 0) {
+        return next(new ExpressError(400, "No valid fields provided for update"));
+    }
+
+    const users = await User.findOneAndUpdate(
+        { _id: userId, tenant: req.user.tenant._id },
+        updatePayload,
+        { new: true }
+    );
     if (!users) return next(new ExpressError(401, "No user AdminRoute"))
     console.log("user changed AdminRoute: ", users)
     res.json(users);
@@ -112,7 +150,7 @@ export const deleteUser = async (req, res, next) => {
     console.log("req.params delete AdminRoutes: ", req.params)
     const { userId } = req.params;
     console.log("got user id", userId)
-    const users = await User.findByIdAndDelete(userId);
+    const users = await User.findOneAndDelete({ _id: userId, tenant: req.user.tenant._id, role: "user" });
     if (!users) return next(new ExpressError(401, "No user AdminRoute"))
     console.log("user delete AdminRoute: ", users)
     res.json(users);
@@ -133,16 +171,18 @@ export const dashboard = async (req, res, next) => {
 export const generateUserReport = async (req, res) => {
 
     const users = await User.find({ tenant: req.user.tenant._id });
+    if (users.length === 0) {
+        throw new ExpressError(404, "No users found to export");
+    }
     // Map only required fields
     const reportData = users.map(u => ({
         Username: u.username,
         Email: u.email,
-        Password: u.password,
         CreatedAt: u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "N/A",
     }));
     function convertToCSV(data) {
-        const headers = Object.keys(data[0]).join(",");
-        const rows = data.map(obj => Object.values(obj).join(","));
+        const headers = Object.keys(data[0]).map(escapeCsvValue).join(",");
+        const rows = data.map(obj => Object.values(obj).map(escapeCsvValue).join(","));
         return [headers, ...rows].join("\n");
     }
     // Convert to CSV or Excel same as monthly report

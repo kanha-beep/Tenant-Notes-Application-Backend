@@ -11,18 +11,41 @@ const verifyToken = async (req, res, next) => {
 
   console.log("auth header present:", Boolean(authHeader));
 
-  if (!token) return res.status(401).json("No token provided");
+  if (!token) {
+    return res.status(401).json({ message: "No token provided" });
+  }
 
-  jwt.verify(token, process.env.JWT_SECRET, async (error, user) => {
-    if (error) return res.status(401).json("Why error in MW");
-    req.user = user;
+  if (!process.env.JWT_SECRET) {
+    return res.status(500).json({ message: "JWT secret is not configured" });
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const currentUser = await User.findById(decoded._id)
+      .populate("tenant", "name plan noteLimit");
+
+    if (!currentUser) {
+      return res.status(401).json({ message: "User not found for token" });
+    }
+
+    const tenantId = currentUser.tenant?._id?.toString();
+    if (!tenantId || tenantId !== decoded.tenant?.toString()) {
+      return res.status(401).json({ message: "Token tenant is invalid" });
+    }
+
+    req.user = currentUser;
+    req.auth = decoded;
+
     try {
-      await User.findByIdAndUpdate(user._id, { lastSeenAt: new Date() });
+      await User.findByIdAndUpdate(currentUser._id, { lastSeenAt: new Date() });
     } catch (presenceError) {
       console.error("Error updating lastSeenAt:", presenceError);
     }
+
     next();
-  });
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid or expired token" });
+  }
 };
 
 const isNoteOwner = async (req, res, next) => {
@@ -62,7 +85,7 @@ const isRole = (...roles) => {
 
 const isTenantAdmin = async (req, res, next) => {
   try {
-    const tenantId = req.user.tenant._id;
+    const tenantId = req.user.tenant?._id;
     if (!tenantId) return res.status(403).json({ message: "No tenant found in token" });
     const tenant = await Tenant.findById(tenantId);
     if (!tenant) return res.status(404).json({ message: "Tenant not found" });
@@ -76,7 +99,7 @@ const isTenantAdmin = async (req, res, next) => {
 
 const isPaid = async (req, res, next) => {
   try {
-    const tenantId = req.user.tenant._id;
+    const tenantId = req.user.tenant?._id;
     if (!tenantId) return res.status(403).json({ message: "No tenant found in token" });
     const tenant = await Tenant.findById(tenantId);
     if (!tenant) return res.status(404).json({ message: "Tenant not found" });

@@ -1,9 +1,19 @@
 import mongoose from "mongoose";
 
 const UserSchema = new mongoose.Schema({
-    username: String,
-    email: String,
-    password: String,
+    username: {
+        type: String,
+        trim: true,
+    },
+    email: {
+        type: String,
+        trim: true,
+        lowercase: true,
+    },
+    password: {
+        type: String,
+        select: false,
+    },
     lastSeenAt: {
         type: Date,
         default: null

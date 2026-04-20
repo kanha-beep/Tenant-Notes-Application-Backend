@@ -3,7 +3,15 @@ import Notes from "../Models/NotesSchema.js";
 import User from "../Models/UserSchema.js";
 import ExpressError from "../Middlewares/ExpressError.js";
 
-const ONE_HOUR_MS = 10 * 60 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+function escapeCsvValue(value) {
+  const stringValue = value == null ? "" : String(value);
+  if (/["\n,]/.test(stringValue)) {
+    return `"${stringValue.replace(/"/g, '""')}"`;
+  }
+  return stringValue;
+}
 
 function prioritizeNotes(notes) {
   const now = Date.now();
@@ -25,28 +33,37 @@ function prioritizeNotes(notes) {
 export const newNote = async (req, res, next) => {
   const { title, content, user, userEmail } = req.body;
   console.log("details: ", title, content, user, userEmail);
+  const tenantId = req.user.tenant?._id;
+
+  if (!title?.trim() || !content?.trim()) {
+    return next(new ExpressError(400, "Title and content are required"));
+  }
 
   const targetEmail = userEmail?.trim().toLowerCase();
   const targetUsername = user?.trim();
 
+  if (!targetEmail && !targetUsername) {
+    return next(new ExpressError(400, "A user email or username is required"));
+  }
+
   const existingUser = targetEmail
-    ? await User.findOne({ email: targetEmail, tenant: req.user.tenant._id })
-    : await User.findOne({ username: targetUsername, tenant: req.user.tenant._id });
+    ? await User.findOne({ email: targetEmail, tenant: tenantId })
+    : await User.findOne({ username: targetUsername, tenant: tenantId });
 
   if (!existingUser) return next(new ExpressError(404, "User not found for this tenant"));
 
-  const existingNote = await Notes.findOne({ tenant: req.user.tenant._id, title });
+  const existingNote = await Notes.findOne({ tenant: tenantId, title: title.trim() });
   if (existingNote) return next(new ExpressError(401, "Note with title already exists"));
 
   const createdAt = new Date();
   const dueAt = new Date(createdAt.getTime() + ONE_HOUR_MS);
 
   const note = await Notes.create({
-    title,
-    content,
+    title: title.trim(),
+    content: content.trim(),
     check: false,
     user: existingUser._id,
-    tenant: req.user.tenant._id,
+    tenant: tenantId,
     dueAt,
     completedAt: null,
     createdAt,
@@ -58,6 +75,10 @@ export const newNote = async (req, res, next) => {
 
 export const notesReport = async (req, res, next) => {
   const notes = await Notes.find({ tenant: req?.user?.tenant?._id });
+  if (notes.length === 0) {
+    return next(new ExpressError(404, "No notes found to export"));
+  }
+
   const reportData = notes.map((n) => ({
     title: n.title,
     content: n.content,
@@ -69,8 +90,8 @@ export const notesReport = async (req, res, next) => {
     date: new Date(n.createdAt).toLocaleString(),
   }));
   function csvData(data) {
-    const headers = Object.keys(data[0]).join(",");
-    const rows = data.map((obj) => Object.values(obj).join(","));
+    const headers = Object.keys(data[0]).map(escapeCsvValue).join(",");
+    const rows = data.map((obj) => Object.values(obj).map(escapeCsvValue).join(","));
     return [headers, ...rows].join("\n");
   }
   const csv = csvData(reportData);
@@ -112,10 +133,11 @@ export const allNotes = async (req, res, next) => {
 
   const totalNotes = await Notes.countDocuments({ ...query, tenant: req.user.tenant._id, user: req.user._id });
   const totalNotesOfCompany = await Notes.countDocuments({ ...query, tenant: req.user.tenant._id });
+  const scopedTotal = req.user.role === "admin" ? totalNotesOfCompany : totalNotes;
 
   res.json({
     page,
-    totalPages: Math.ceil(totalNotes / limit),
+    totalPages: Math.max(1, Math.ceil(scopedTotal / limit)),
     totalNotes,
     adminNotes: adminPagination,
     userNotes: userPagination,
@@ -135,7 +157,7 @@ export const updateCheck = async (req, res, next) => {
   try {
     const { noteId } = req.params;
     const notes = await Notes.findOne({ _id: noteId, tenant: req.user.tenant._id }).populate("tenant", "name").populate("user", "userId");
-    if (!notes) return next(ExpressError(401, "No single note found"));
+    if (!notes) return next(new ExpressError(401, "No single note found"));
     const check = Boolean(req.body.check);
     const trimmedFeedback = typeof req.body.userFeedback === "string"
       ? req.body.userFeedback.trim()
@@ -165,7 +187,13 @@ export const singleNoteToEdit = async (req, res, next) => {
 export const editNote = async (req, res, next) => {
   const { noteId } = req.params;
   const { title, content } = req.body;
-  const newData = { title, content };
+  const newData = {
+    title: title?.trim(),
+    content: content?.trim(),
+  };
+  if (!newData.title || !newData.content) {
+    return next(new ExpressError(400, "Title and content are required"));
+  }
   const newNotes = await Notes.findOneAndUpdate(
     { _id: noteId, tenant: req.user.tenant._id },
     newData,
@@ -180,7 +208,7 @@ export const deleteNote = async (req, res, next) => {
   const { noteId } = req.params;
   console.log("id delete B: ", noteId);
   console.log("params delete B: ", req.params);
-  const notes = await Notes.findOneAndDelete({ _id: noteId, tenant: req.user.tenant });
+  const notes = await Notes.findOneAndDelete({ _id: noteId, tenant: req.user.tenant._id });
   if (!notes) return next(new ExpressError(401, "No notes deleted"));
   res.json(notes);
 };

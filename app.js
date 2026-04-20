@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import cookieParser from "cookie-parser";
 import path from "path";
 import { fileURLToPath } from "url";
 import ExpressError from "./Middlewares/ExpressError.js";
@@ -30,7 +29,7 @@ const allowedOrigins = [
   "http://localhost:5174",
   "http://127.0.0.1:5174",
   process.env.FRONTEND_URL
-];
+].filter(Boolean);
 app.use(
   cors({
     origin(origin, callback) {
@@ -41,13 +40,12 @@ app.use(
 
       callback(new Error("Origin not allowed by CORS"));
     },
-    credentials: true
+    credentials: false
   })
 );
 mongooseConnect()
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json());
-app.use(cookieParser());
 app.get("/api/homepage", (req, res) => {
   res.json(getHomepageData());
 });
@@ -76,6 +74,9 @@ app.use("/users", UserRoutes);
 app.use("/admin", AdminRoutes)
 //health
 app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
+})
+app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 })
 app.use(express.static(clientDistPath));

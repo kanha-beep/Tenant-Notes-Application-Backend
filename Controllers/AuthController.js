@@ -7,8 +7,14 @@ import jwt from "jsonwebtoken";
 
 export const registerUser = async (req, res, next) => {
   console.log("Register request body:", req.body);
-  const { email, password, username } = req.body;
+  const email = req.body.email?.trim().toLowerCase();
+  const password = req.body.password?.trim();
+  const username = req.body.username?.trim();
   const tenant = req.body.tenant?.toLowerCase();
+  if (!email || !password || !username || !tenant) {
+    return next(new ExpressError(400, "Please enter username, email, password, and tenant"));
+  }
+
   const findTenant = await Tenant.findOne({ name: tenant });
   if (!findTenant) return next(new ExpressError(403, "No existing Tenant found"));
   const existingUser = await User.findOne({ email, tenant: findTenant._id });
@@ -25,22 +31,29 @@ export const registerUser = async (req, res, next) => {
   res.json({
     _id: user._id,
     email: user.email,
+    username: user.username,
     role: user.role,
     tenant: user.tenant,
   });
 };
 
-const generateToken = (user) =>
-  jwt.sign(
+const generateToken = (user) => {
+  if (!process.env.JWT_SECRET) {
+    throw new Error("JWT secret is not configured");
+  }
+
+  return jwt.sign(
     { _id: user._id, tenant: user.tenant, role: user.role },
     process.env.JWT_SECRET,
     { expiresIn: "1d" }
   );
+};
 
 export const loginUser = async (req, res, next) => {
   try {
     console.log("Login request body:", req.body);
-    const { email, password } = req.body;
+    const email = req.body.email?.trim().toLowerCase();
+    const password = req.body.password?.trim();
     const tenant = req.body.tenant?.toLowerCase();
     if (!email || !password || !tenant) {
       return next(new ExpressError(400, "Wrong details. Please enter all"));
@@ -49,7 +62,9 @@ export const loginUser = async (req, res, next) => {
     const findTenant = await Tenant.findOne({ name: tenant });
     if (!findTenant) return next(new ExpressError(403, "No tenant exist found"));
 
-    const user = await User.findOne({ email, tenant: findTenant._id }).populate("tenant");
+    const user = await User.findOne({ email, tenant: findTenant._id })
+      .select("+password")
+      .populate("tenant");
     if (!user) return next(new ExpressError(400, "Invalid credentials"));
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
@@ -76,7 +91,7 @@ export const loginUser = async (req, res, next) => {
 };
 
 export const currentOwner = async (req, res, next) => {
-  const user = await User.findById(req.user._id).populate("tenant", "name");
+  const user = await User.findById(req.user._id).populate("tenant", "name plan noteLimit");
   console.log("current owner NotesAuth: ", user.username);
   if (!user) return next(new ExpressError(404, "User not found"));
   res.json(user);
