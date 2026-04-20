@@ -29,7 +29,12 @@ const verifyToken = async (req, res, next) => {
     }
 
     const tenantId = currentUser.tenant?._id?.toString();
-    if (!tenantId || tenantId !== decoded.tenant?.toString()) {
+    const decodedTenantId =
+      typeof decoded.tenant === "object" && decoded.tenant !== null
+        ? decoded.tenant._id?.toString()
+        : decoded.tenant?.toString();
+
+    if (!tenantId || !decodedTenantId || tenantId !== decodedTenantId) {
       return res.status(401).json({ message: "Token tenant is invalid" });
     }
 

@@ -42,8 +42,13 @@ const generateToken = (user) => {
     throw new Error("JWT secret is not configured");
   }
 
+  const tenantId =
+    typeof user.tenant === "object" && user.tenant !== null
+      ? user.tenant._id?.toString()
+      : user.tenant?.toString();
+
   return jwt.sign(
-    { _id: user._id, tenant: user.tenant, role: user.role },
+    { _id: user._id.toString(), tenant: tenantId, role: user.role },
     process.env.JWT_SECRET,
     { expiresIn: "1d" }
   );
