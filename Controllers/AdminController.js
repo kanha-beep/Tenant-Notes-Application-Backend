@@ -3,7 +3,10 @@ import bcrypt from "bcryptjs";
 import User from "../Models/UserSchema.js"
 import Notes from "../Models/NotesSchema.js"
 import Tenant from "../Models/TenantSchema.js";
+import Invite from "../Models/InviteSchema.js";
 import ExpressError from "../Middlewares/ExpressError.js"
+import { recordAuditLog } from "../Services/auditService.js";
+import { getTenantDashboard } from "../Services/tenantInsightsService.js";
 
 function escapeCsvValue(value) {
     const stringValue = value == null ? "" : String(value);
@@ -20,70 +23,70 @@ function generateTemporaryPassword() {
 export const getPlan = async (req, res, next) => {
     const tenants = await Tenant.findById(req.user.tenant._id);
     if (!tenants) return next(new ExpressError(401, "No tenant adminROute"))
-    const plan = tenants.plan;
-    if (!plan) return next(new ExpressError(402, "No plan adminRoutes"))
-    // console.log("tenant found AdminRoute: ", tenants)
-    res.json(plan);
+    res.json({
+        plan: tenants.plan,
+        noteLimit: tenants.noteLimit,
+        billing: tenants.billing,
+        paidUsers: tenants.paidUsers,
+        settings: tenants.settings,
+    });
 
 };
 //plan change
 export const buyPlan = async (req, res, next) => {
-    const { amount } = req.body;
-    const amtValue = Number(amount)
+    const { plan, seats, slaHours } = req.body;
     const tenants = await Tenant.findById(req.user.tenant._id);
     if (!tenants) return next(new ExpressError(401, "No tenant adminRoute"))
-    const existingPlan = tenants.plan;
-    console.log("existing plan", existingPlan);
-    console.log('amount from body', typeof amount)//
-    if (amtValue === 100) {
-        tenants.plan = "paid";
-        tenants.noteLimit = "unlimited";
-        console.log("changed plan", tenants.plan, tenants.noteLimit)//
-    } else if (amtValue <= 100) {
-        tenants.plan = "free";
-        tenants.noteLimit = "3";
-        console.log("no change", tenants.plan, tenants.noteLimit)
+    const planMap = {
+        free: { noteLimit: "10", seats: 5 },
+        team: { noteLimit: "unlimited", seats: 25 },
+        enterprise: { noteLimit: "unlimited", seats: 250 },
+    };
+    const selectedPlan = planMap[plan] || planMap.free;
+    tenants.plan = plan || tenants.plan;
+    tenants.noteLimit = selectedPlan.noteLimit;
+    tenants.billing.seats = Number(seats) || selectedPlan.seats;
+    tenants.billing.status = "active";
+    tenants.billing.renewalDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    if (slaHours) {
+        tenants.settings.slaHours = Number(slaHours);
     }
     await tenants.save();
-    console.log("tenant paid saved AdminRoute: ", tenants);
+    await recordAuditLog({
+        tenantId: tenants._id,
+        actorId: req.user._id,
+        action: "tenant.plan.updated",
+        entityType: "tenant",
+        entityId: tenants._id,
+        metadata: { plan: tenants.plan, seats: tenants.billing.seats },
+    });
     res.json(tenants);
 }
 //all users
 export const allUsers = async (req, res, next) => {
-    // const searchUser = req.query.search || "";
-    // const sort = req.query.sort || "";
-    console.log("got value for pagination: ", req.query)
     const search = req.query.search || "";
     const sort = req.query.sort || "email";
     const page = parseInt(req.query.page) || 1;
     const limit = 5;
     const skip = (page - 1) * limit;
-    // console.log("1. sort: ", sort)
-    console.log("all users: ", req.user.tenant._id)
-    // const users = await User.find({ role: "user", tenant: req.user.tenant._id });
-    // console.log("all users: ", users)
-    // if (!users) return next(new ExpressError(401, "No user AdminRoute"))
     const query = {};
-    //search
     if (search) query.username = { $regex: search, $options: "i" }
-    //sort
     const sortOptions = {}
     if (sort === "username") sortOptions.username = 1;
     if (sort === "email") sortOptions.email = 1;
-    const finalUsers = await User.find({ ...query, role: "user", tenant: req.user.tenant._id }).sort(sortOptions).skip(skip).limit(limit)
-    console.log("all users: ", finalUsers)
-    const totalUsers = await User.countDocuments({ ...query, role: "user", tenant: req.user.tenant._id });
+    if (sort === "role") sortOptions.role = 1;
+    const finalUsers = await User.find({ ...query, tenant: req.user.tenant._id }).sort(sortOptions).skip(skip).limit(limit)
+    const totalUsers = await User.countDocuments({ ...query, tenant: req.user.tenant._id });
     const totalPages = Math.ceil(totalUsers / limit);
-    // console.log("now search user is being set", finalUsers, totalUsers, totalPages)
     res.json({ users: finalUsers, totalNoOfUsers: totalUsers, totalPages: totalPages, page: page });
 }
 //new user
 export const newUser = async (req, res, next) => {
     try {
-        console.log("getting user id new: ", req.params)
         const username = req.body.username?.trim();
         const email = req.body.email?.trim().toLowerCase();
         const rawPassword = req.body.password?.trim() || req.body.content?.trim() || req.body.title?.trim();
+        const role = req.body.role || "member";
         if (!username || !email) {
             return next(new ExpressError(400, "Username and email are required"));
         }
@@ -99,13 +102,19 @@ export const newUser = async (req, res, next) => {
             username,
             email,
             password,
-            role: "user",
+            role,
             tenant: req.user.tenant._id
         });
-        console.log("user created AdminRoute: ", user)
+        await recordAuditLog({
+            tenantId: req.user.tenant._id,
+            actorId: req.user._id,
+            action: "user.created",
+            entityType: "user",
+            entityId: user._id,
+            metadata: { role },
+        });
         res.status(201).json({ success: true, user, temporaryPassword });
     } catch (error) {
-        console.log("Error creating user: ", error);
         next(new ExpressError(500, "Failed to create user"));
     }
 }
@@ -120,8 +129,7 @@ export const singleUser = async (req, res, next) => {
 //users change
 export const updateUser = async (req, res, next) => {
     const { userId } = req.params;
-    console.log("req.body user change AdminRoutes: ", req.body);
-    const { username, email, password } = req.body;
+    const { username, email, password, role, status } = req.body;
     const updatePayload = {};
     if (typeof username === "string" && username.trim()) {
         updatePayload.username = username.trim();
@@ -132,6 +140,8 @@ export const updateUser = async (req, res, next) => {
     if (typeof password === "string" && password.trim()) {
         updatePayload.password = await bcrypt.hash(password.trim(), 10);
     }
+    if (role) updatePayload.role = role;
+    if (status) updatePayload.status = status;
     if (Object.keys(updatePayload).length === 0) {
         return next(new ExpressError(400, "No valid fields provided for update"));
     }
@@ -142,31 +152,36 @@ export const updateUser = async (req, res, next) => {
         { new: true }
     );
     if (!users) return next(new ExpressError(401, "No user AdminRoute"))
-    console.log("user changed AdminRoute: ", users)
+    await recordAuditLog({
+        tenantId: req.user.tenant._id,
+        actorId: req.user._id,
+        action: "user.updated",
+        entityType: "user",
+        entityId: users._id,
+        metadata: { fields: Object.keys(updatePayload) },
+    });
     res.json(users);
 }
 //users delete
 export const deleteUser = async (req, res, next) => {
-    console.log("req.params delete AdminRoutes: ", req.params)
     const { userId } = req.params;
-    console.log("got user id", userId)
-    const users = await User.findOneAndDelete({ _id: userId, tenant: req.user.tenant._id, role: "user" });
+    const users = await User.findOneAndDelete({ _id: userId, tenant: req.user.tenant._id, role: { $ne: "owner" } });
     if (!users) return next(new ExpressError(401, "No user AdminRoute"))
-    console.log("user delete AdminRoute: ", users)
+    await recordAuditLog({
+        tenantId: req.user.tenant._id,
+        actorId: req.user._id,
+        action: "user.deleted",
+        entityType: "user",
+        entityId: users._id,
+        metadata: { email: users.email },
+    });
     res.json(users);
 
 }
 //dashboard
 export const dashboard = async (req, res, next) => {
-    // console.log("dashboard AdminRoutes: ", req.user)
-    const totalNotes = await Notes.countDocuments({ tenant: req.user.tenant._id });
-    // console.log("total notes: ", totalNotes)
-    if (totalNotes < 0) return next(new ExpressError(402, "No user dashboard"))
-    const totalUsers = await User.countDocuments({ role: "user", tenant: req.user.tenant._id });
-    const allAdmins = await User.find({ tenant: req?.user?.tenant?._id, role:"admin" })
-    // console.log("all admins: ", allAdmins)
-    if (totalUsers < 0) return next(new ExpressError(401, "No total users coming"))
-    res.json({ totalUsers, totalNotes, allAdmins })
+    const data = await getTenantDashboard(req.user.tenant._id);
+    res.json(data);
 }
 export const generateUserReport = async (req, res) => {
 
@@ -190,4 +205,74 @@ export const generateUserReport = async (req, res) => {
     res.header("Content-Type", "text/csv");
     res.attachment("User_Report.csv");
     res.send(csv);
+};
+
+export const createInvite = async (req, res, next) => {
+    const email = req.body.email?.trim().toLowerCase();
+    const role = req.body.role || "member";
+    if (!email) {
+        return next(new ExpressError(400, "Invite email is required"));
+    }
+
+    const invite = await Invite.create({
+        tenant: req.user.tenant._id,
+        email,
+        role,
+        invitedBy: req.user._id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    await recordAuditLog({
+        tenantId: req.user.tenant._id,
+        actorId: req.user._id,
+        action: "invite.created",
+        entityType: "invite",
+        entityId: invite._id,
+        metadata: { email, role },
+    });
+
+    res.status(201).json({
+        invite,
+        inviteUrl: `${process.env.FRONTEND_URL || "http://localhost:5173"}/auth?invite=${invite.token}`,
+    });
+};
+
+export const listInvites = async (req, res) => {
+    const invites = await Invite.find({ tenant: req.user.tenant._id }).sort({ createdAt: -1 });
+    res.json(invites);
+};
+
+export const listTemplates = async (req, res) => {
+    const tenant = await Tenant.findById(req.user.tenant._id);
+    res.json(tenant?.templates || []);
+};
+
+export const createTemplate = async (req, res, next) => {
+    const tenant = await Tenant.findById(req.user.tenant._id);
+    if (!tenant) {
+        return next(new ExpressError(404, "Tenant not found"));
+    }
+
+    const template = {
+        name: req.body.name?.trim(),
+        title: req.body.title?.trim(),
+        content: req.body.content?.trim(),
+        category: req.body.category?.trim() || "general",
+        createdBy: req.user._id,
+    };
+
+    if (!template.name || !template.title || !template.content) {
+        return next(new ExpressError(400, "Template name, title, and content are required"));
+    }
+
+    tenant.templates.push(template);
+    await tenant.save();
+    await recordAuditLog({
+        tenantId: tenant._id,
+        actorId: req.user._id,
+        action: "template.created",
+        entityType: "template",
+        entityId: tenant.templates[tenant.templates.length - 1]._id,
+    });
+    res.status(201).json(tenant.templates[tenant.templates.length - 1]);
 };

@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import User from "../Models/UserSchema.js"
 import ExpressError from "../Middlewares/ExpressError.js";
+import { recordAuditLog } from "../Services/auditService.js";
 
 function canAccessUser(req, user) {
     if (!user) {
@@ -10,7 +11,7 @@ function canAccessUser(req, user) {
     const sameTenant = user.tenant?._id?.toString() === req.user.tenant?._id?.toString();
     const isSelf = user._id.toString() === req.user._id.toString();
 
-    return isSelf || (req.user.role === "admin" && sameTenant);
+    return isSelf || (["owner", "admin"].includes(req.user.role) && sameTenant);
 }
 // /api/users
 // //users current user
@@ -50,8 +51,14 @@ export const editUser = async (req, res, next) => {
     const user = await User.findByIdAndUpdate(req.params.userId, newData, { new: true })
         .populate("tenant", "name plan noteLimit");
     if (!user) return next(new ExpressError(404, "User not found"))
-    console.log("new update", newData)
-    console.log("updated User", user)
+    await recordAuditLog({
+        tenantId: req.user.tenant._id,
+        actorId: req.user._id,
+        action: "user.updated",
+        entityType: "user",
+        entityId: user._id,
+        metadata: { fields: Object.keys(newData) },
+    });
     res.json({ message: "Profile updated successfully", user });
 
 }

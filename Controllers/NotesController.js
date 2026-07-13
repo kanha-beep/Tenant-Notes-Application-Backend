@@ -1,9 +1,16 @@
 // /api/notes
 import Notes from "../Models/NotesSchema.js";
-import User from "../Models/UserSchema.js";
 import ExpressError from "../Middlewares/ExpressError.js";
-
-const ONE_HOUR_MS = 60 * 60 * 1000;
+import { recordAuditLog } from "../Services/auditService.js";
+import {
+  addCommentToNote,
+  createNoteForTenant,
+  deleteNoteForActor,
+  getNoteForActor,
+  listNotesForActor,
+  updateNoteDetailsForActor,
+  updateNoteProgressForActor,
+} from "../Services/noteService.js";
 
 function escapeCsvValue(value) {
   const stringValue = value == null ? "" : String(value);
@@ -13,68 +20,31 @@ function escapeCsvValue(value) {
   return stringValue;
 }
 
-function prioritizeNotes(notes) {
-  const now = Date.now();
-  return [...notes].sort((a, b) => {
-    const aOverdue = !a.check && a.dueAt && new Date(a.dueAt).getTime() < now;
-    const bOverdue = !b.check && b.dueAt && new Date(b.dueAt).getTime() < now;
-    if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
-
-    const aPending = !a.check;
-    const bPending = !b.check;
-    if (aPending !== bPending) return aPending ? -1 : 1;
-
-    const aDue = a.dueAt ? new Date(a.dueAt).getTime() : 0;
-    const bDue = b.dueAt ? new Date(b.dueAt).getTime() : 0;
-    return aDue - bDue;
-  });
-}
-
 export const newNote = async (req, res, next) => {
-  const { title, content, user, userEmail } = req.body;
-  console.log("details: ", title, content, user, userEmail);
-  const tenantId = req.user.tenant?._id;
-
-  if (!title?.trim() || !content?.trim()) {
-    return next(new ExpressError(400, "Title and content are required"));
-  }
-
-  const targetEmail = userEmail?.trim().toLowerCase();
-  const targetUsername = user?.trim();
-
-  if (!targetEmail && !targetUsername) {
-    return next(new ExpressError(400, "A user email or username is required"));
-  }
-
-  const existingUser = targetEmail
-    ? await User.findOne({ email: targetEmail, tenant: tenantId })
-    : await User.findOne({ username: targetUsername, tenant: tenantId });
-
-  if (!existingUser) return next(new ExpressError(404, "User not found for this tenant"));
-
-  const existingNote = await Notes.findOne({ tenant: tenantId, title: title.trim() });
-  if (existingNote) return next(new ExpressError(401, "Note with title already exists"));
-
-  const createdAt = new Date();
-  const dueAt = new Date(createdAt.getTime() + ONE_HOUR_MS);
-
-  const note = await Notes.create({
-    title: title.trim(),
-    content: content.trim(),
-    check: false,
-    user: existingUser._id,
-    tenant: tenantId,
-    dueAt,
-    completedAt: null,
-    createdAt,
+  const note = await createNoteForTenant({
+    actor: req.user,
+    tenant: req.tenant,
+    input: req.body,
   });
 
-  console.log("new note NotesRoute B: ", note);
-  res.json(note);
+  await recordAuditLog({
+    tenantId: req.tenant._id,
+    actorId: req.user._id,
+    action: "note.created",
+    entityType: "note",
+    entityId: note._id,
+    metadata: { assigneeId: note.user, priority: note.priority },
+  });
+
+  res.status(201).json(note);
 };
 
 export const notesReport = async (req, res, next) => {
-  const notes = await Notes.find({ tenant: req?.user?.tenant?._id });
+  const query = { tenant: req.user.tenant._id };
+  if (!["owner", "admin"].includes(req.user.role)) {
+    query.user = req.user._id;
+  }
+  const notes = await Notes.find(query);
   if (notes.length === 0) {
     return next(new ExpressError(404, "No notes found to export"));
   }
@@ -105,110 +75,99 @@ export const allNotes = async (req, res, next) => {
   const search = req.query.search || "";
   const sortBy = req.query.sort || "title";
   const page = parseInt(req.query.page) || 1;
-  const limit = 5;
-  const skip = (page - 1) * limit;
-  const query = {};
-  console.log(`user id ${req.user._id}`);
-  if (search) query.title = { $regex: search, $options: "i" };
-  const sortOptions = {};
-  if (sortBy === "title") sortOptions.title = 1;
-  if (sortBy === "content") sortOptions.content = 1;
-  if (sortBy === "deadline") sortOptions.dueAt = 1;
-
-  const adminRaw = await Notes.find({ ...query, tenant: req.user.tenant._id })
-    .populate("tenant")
-    .populate("user", "username email")
-    .sort(sortOptions);
-  const userRaw = await Notes.find({ ...query, tenant: req.user.tenant._id, user: req.user._id })
-    .populate("tenant")
-    .populate("user", "username email")
-    .sort(sortOptions);
-
-  if (!adminRaw || !userRaw) return next(new ExpressError(401, "No notes to show"));
-
-  const prioritizedAdminNotes = prioritizeNotes(adminRaw);
-  const prioritizedUserNotes = prioritizeNotes(userRaw);
-  const adminPagination = prioritizedAdminNotes.slice(skip, skip + limit);
-  const userPagination = prioritizedUserNotes.slice(skip, skip + limit);
-
-  const totalNotes = await Notes.countDocuments({ ...query, tenant: req.user.tenant._id, user: req.user._id });
-  const totalNotesOfCompany = await Notes.countDocuments({ ...query, tenant: req.user.tenant._id });
-  const scopedTotal = req.user.role === "admin" ? totalNotesOfCompany : totalNotes;
-
-  res.json({
+  const data = await listNotesForActor({
+    actor: req.user,
+    tenantId: req.user.tenant._id,
+    search,
+    sort: sortBy,
     page,
-    totalPages: Math.max(1, Math.ceil(scopedTotal / limit)),
-    totalNotes,
-    adminNotes: adminPagination,
-    userNotes: userPagination,
-    totalNotesOfCompany,
   });
+  res.json(data);
 };
 
 export const singleNote = async (req, res, next) => {
   const { noteId } = req.params;
-  const notes = await Notes.findOne({ _id: noteId, tenant: req.user.tenant._id }).populate("tenant", "name").populate("user", "username email");
-  console.log("single notes: ", notes?.user);
-  if (!notes) return next(new ExpressError(401, "No single notes"));
-  res.json(notes);
+  const note = await getNoteForActor({
+    actor: req.user,
+    tenantId: req.user.tenant._id,
+    noteId,
+  });
+  res.json(note);
 };
 
 export const updateCheck = async (req, res, next) => {
-  try {
-    const { noteId } = req.params;
-    const notes = await Notes.findOne({ _id: noteId, tenant: req.user.tenant._id }).populate("tenant", "name").populate("user", "userId");
-    if (!notes) return next(new ExpressError(401, "No single note found"));
-    const check = Boolean(req.body.check);
-    const trimmedFeedback = typeof req.body.userFeedback === "string"
-      ? req.body.userFeedback.trim()
-      : notes.userFeedback || "";
-    const updatePayload = {
-      check,
-      completedAt: check ? new Date() : null,
-      userFeedback: trimmedFeedback,
-      feedbackAt: trimmedFeedback ? new Date() : null,
-    };
-    const newNotes = await Notes.findByIdAndUpdate({ _id: noteId }, updatePayload, { new: true })
-      .populate("tenant", "name")
-      .populate("user", "username email");
-    res.json(newNotes);
-  } catch (e) {
-    res.status(401).json({ message: e });
-  }
+  const note = await updateNoteProgressForActor({
+    actor: req.user,
+    tenantId: req.user.tenant._id,
+    noteId: req.params.noteId,
+    updates: req.body,
+  });
+  await recordAuditLog({
+    tenantId: req.user.tenant._id,
+    actorId: req.user._id,
+    action: "note.progress.updated",
+    entityType: "note",
+    entityId: note._id,
+    metadata: { check: note.check, status: note.status },
+  });
+  res.json(note);
 };
 
 export const singleNoteToEdit = async (req, res, next) => {
-  const { noteId } = req.params;
-  const notes = await Notes.findOne({ _id: noteId, tenant: req.user.tenant._id });
-  if (!notes) return next(new ExpressError(404, "Note not found"));
-  res.json(notes);
+  const note = await getNoteForActor({
+    actor: req.user,
+    tenantId: req.user.tenant._id,
+    noteId: req.params.noteId,
+  });
+  res.json(note);
 };
 
 export const editNote = async (req, res, next) => {
-  const { noteId } = req.params;
-  const { title, content } = req.body;
-  const newData = {
-    title: title?.trim(),
-    content: content?.trim(),
-  };
-  if (!newData.title || !newData.content) {
-    return next(new ExpressError(400, "Title and content are required"));
-  }
-  const newNotes = await Notes.findOneAndUpdate(
-    { _id: noteId, tenant: req.user.tenant._id },
-    newData,
-    { new: true }
-  );
-  if (!newNotes) return next(new ExpressError(404, "Note not found or unauthorized"));
-  console.log("New Notes Updated: ", newNotes);
-  res.json(newNotes);
+  const note = await updateNoteDetailsForActor({
+    actor: req.user,
+    tenantId: req.user.tenant._id,
+    noteId: req.params.noteId,
+    updates: req.body,
+  });
+  await recordAuditLog({
+    tenantId: req.user.tenant._id,
+    actorId: req.user._id,
+    action: "note.updated",
+    entityType: "note",
+    entityId: note._id,
+  });
+  res.json(note);
 };
 
 export const deleteNote = async (req, res, next) => {
-  const { noteId } = req.params;
-  console.log("id delete B: ", noteId);
-  console.log("params delete B: ", req.params);
-  const notes = await Notes.findOneAndDelete({ _id: noteId, tenant: req.user.tenant._id });
-  if (!notes) return next(new ExpressError(401, "No notes deleted"));
-  res.json(notes);
+  const note = await deleteNoteForActor({
+    actor: req.user,
+    tenantId: req.user.tenant._id,
+    noteId: req.params.noteId,
+  });
+  await recordAuditLog({
+    tenantId: req.user.tenant._id,
+    actorId: req.user._id,
+    action: "note.deleted",
+    entityType: "note",
+    entityId: note._id,
+  });
+  res.json(note);
+};
+
+export const addComment = async (req, res, next) => {
+  const note = await addCommentToNote({
+    actor: req.user,
+    tenantId: req.user.tenant._id,
+    noteId: req.params.noteId,
+    body: req.body.body,
+  });
+  await recordAuditLog({
+    tenantId: req.user.tenant._id,
+    actorId: req.user._id,
+    action: "note.comment.added",
+    entityType: "note",
+    entityId: req.params.noteId,
+  });
+  res.status(201).json(note);
 };

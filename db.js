@@ -7,8 +7,8 @@ import bcrypt from "bcryptjs";
 dotenv.config();
 const MONGO_URI = process.env.MONGO_URI || "mongodb+srv://kanha_beep_db_user:RjWlquLu09OU4cKo@kanha-code.qx9zs9d.mongodb.net/tenantDB?retryWrites=true&w=majority&appName=Kanha-Code";
 const tenantData = [
-  { name: "acme", plan: "free", noteLimit: 3 },
-  { name: "efgh", plan: "free", noteLimit: 3 },
+  { name: "acme", plan: "free", noteLimit: 10 },
+  { name: "efgh", plan: "free", noteLimit: 10 },
 ];
 
 export const mongooseConnect = async () => {
@@ -63,5 +63,4 @@ export const mongooseConnect = async () => {
 
 
 // // Users to create
-
 

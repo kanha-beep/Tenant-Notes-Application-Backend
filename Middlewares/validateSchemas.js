@@ -7,7 +7,7 @@ const validateNotesSchema = Joi.object({
 const validateTenantsSchema = Joi.object({
     name: Joi.string().min(1).max(30).required().messages({ "string.empty": "Please enter", "string.min": "Please enter min 1 char", "string.max": "Please enter below 30 char" }),
     plan: Joi.string().valid("free", "paid", "enterprise").default("free"),
-    noteLimit: Joi.string().valid("3", "unlimited").default("3"),
+    noteLimit: Joi.string().valid("10", "unlimited").default("10"),
     paidUsers: Joi.number.default(0)
 }).options({ stripUnknown: true })
 const validateUsersSchema = Joi.object({

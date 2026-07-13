@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import cookieParser from "cookie-parser";
 import ExpressError from "./Middlewares/ExpressError.js";
 import AuthRoutes from "./Routes/AuthRoutes.js";
 import {
@@ -18,6 +19,7 @@ import UserRoutes from "./Routes/UsersRoute.js";
 //admin   /api/admin
 import AdminRoutes from "./Routes/AdminRoutes.js"
 import { mongooseConnect } from "./db.js";
+import { mongoSanitize, rateLimit, securityHeaders } from "./Middlewares/security.js";
 dotenv.config()
 const app = express();
 const __filename = fileURLToPath(import.meta.url);
@@ -40,12 +42,17 @@ app.use(
 
       callback(new Error("Origin not allowed by CORS"));
     },
-    credentials: false
+    credentials: true
   })
 );
 mongooseConnect()
+app.use(securityHeaders);
+app.use(rateLimit({ windowMs: 60_000, max: 120 }));
+app.use(rateLimit({ windowMs: 60_000, max: 12, keyGenerator: (req) => `${req.ip}:${req.path}` }));
+app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }))
 app.use(express.json());
+app.use(mongoSanitize);
 app.get("/api/homepage", (req, res) => {
   res.json(getHomepageData());
 });

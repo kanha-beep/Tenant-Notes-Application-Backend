@@ -1,62 +1,125 @@
 import bcrypt from "bcryptjs";
-import { userValidation } from "../Validation/SchemaValidation.js";
 import User from "../Models/UserSchema.js";
 import Tenant from "../Models/TenantSchema.js";
+import Invite from "../Models/InviteSchema.js";
 import ExpressError from "../Middlewares/ExpressError.js";
-import jwt from "jsonwebtoken";
+import { clearAuthCookie, generateToken, setAuthCookie } from "../Services/authService.js";
+import { recordAuditLog } from "../Services/auditService.js";
 
-export const registerUser = async (req, res, next) => {
-  console.log("Register request body:", req.body);
-  const email = req.body.email?.trim().toLowerCase();
-  const password = req.body.password?.trim();
-  const username = req.body.username?.trim();
-  const tenant = req.body.tenant?.toLowerCase();
-  if (!email || !password || !username || !tenant) {
-    return next(new ExpressError(400, "Please enter username, email, password, and tenant"));
-  }
-
-  const findTenant = await Tenant.findOne({ name: tenant });
-  if (!findTenant) return next(new ExpressError(403, "No existing Tenant found"));
-  const existingUser = await User.findOne({ email, tenant: findTenant._id });
-  if (existingUser) return next(new ExpressError(402, "Already Registered"));
-  const hashPassword = await bcrypt.hash(password, 10);
-  const user = await User.create({
-    email,
-    password: hashPassword,
-    tenant: findTenant._id,
-    username,
-    role: "user",
-    lastSeenAt: new Date(),
-  });
-  res.json({
+function serializeAuthUser(user) {
+  return {
     _id: user._id,
     email: user.email,
     username: user.username,
     role: user.role,
+    status: user.status,
     tenant: user.tenant,
-  });
-};
+  };
+}
 
-const generateToken = (user) => {
-  if (!process.env.JWT_SECRET) {
-    throw new Error("JWT secret is not configured");
+export const registerUser = async (req, res, next) => {
+  const email = req.body.email?.trim().toLowerCase();
+  const password = req.body.password?.trim();
+  const username = req.body.username?.trim();
+  const tenantName = req.body.tenant?.trim().toLowerCase();
+  const inviteToken = req.body.inviteToken?.trim();
+
+  if (!email || !password || !username) {
+    return next(new ExpressError(400, "Please enter username, email, and password"));
   }
 
-  const tenantId =
-    typeof user.tenant === "object" && user.tenant !== null
-      ? user.tenant._id?.toString()
-      : user.tenant?.toString();
+  const hashPassword = await bcrypt.hash(password, 10);
 
-  return jwt.sign(
-    { _id: user._id.toString(), tenant: tenantId, role: user.role },
-    process.env.JWT_SECRET,
-    { expiresIn: "1d" }
-  );
+  if (inviteToken) {
+    const invite = await Invite.findOne({ token: inviteToken, acceptedAt: null }).populate("tenant");
+    if (!invite || invite.expiresAt < new Date()) {
+      return next(new ExpressError(400, "Invite link is invalid or expired"));
+    }
+    if (invite.email !== email) {
+      return next(new ExpressError(400, "Invite email does not match this account"));
+    }
+
+    const existingInvitedUser = await User.findOne({ email, tenant: invite.tenant._id });
+    if (existingInvitedUser) {
+      return next(new ExpressError(409, "This invite has already been used"));
+    }
+
+    const user = await User.create({
+      email,
+      password: hashPassword,
+      tenant: invite.tenant._id,
+      username,
+      role: invite.role,
+      status: "active",
+      invitedBy: invite.invitedBy,
+      invitedAt: invite.createdAt,
+      lastSeenAt: new Date(),
+    });
+
+    invite.acceptedAt = new Date();
+    await invite.save();
+    await recordAuditLog({
+      tenantId: invite.tenant._id,
+      actorId: user._id,
+      action: "invite.accepted",
+      entityType: "invite",
+      entityId: invite._id,
+      metadata: { email, role: invite.role },
+    });
+
+    res.status(201).json({ user: serializeAuthUser({ ...user.toObject(), tenant: invite.tenant }) });
+    return;
+  }
+
+  if (!tenantName) {
+    return next(new ExpressError(400, "Tenant name is required"));
+  }
+
+  const existingTenant = await Tenant.findOne({ name: tenantName });
+  if (existingTenant) {
+    return next(new ExpressError(403, "This workspace exists already. Ask for an invite link."));
+  }
+
+  const tenant = await Tenant.create({
+    name: tenantName,
+    displayName: req.body.tenantDisplayName?.trim() || tenantName,
+    plan: "free",
+    noteLimit: "10",
+    billing: { seats: 5, status: "trialing" },
+    templates: [
+      {
+        name: "Follow-up",
+        title: "Customer follow-up",
+        content: "Summarize the issue, owner, next step, and target resolution date.",
+        category: "customer-success",
+      },
+    ],
+  });
+
+  const user = await User.create({
+    email,
+    password: hashPassword,
+    tenant: tenant._id,
+    username,
+    role: "owner",
+    status: "active",
+    lastSeenAt: new Date(),
+  });
+
+  await recordAuditLog({
+    tenantId: tenant._id,
+    actorId: user._id,
+    action: "tenant.created",
+    entityType: "tenant",
+    entityId: tenant._id,
+    metadata: { ownerEmail: email },
+  });
+
+  res.status(201).json({ user: serializeAuthUser({ ...user.toObject(), tenant }) });
 };
 
 export const loginUser = async (req, res, next) => {
   try {
-    console.log("Login request body:", req.body);
     const email = req.body.email?.trim().toLowerCase();
     const password = req.body.password?.trim();
     const tenant = req.body.tenant?.toLowerCase();
@@ -71,6 +134,7 @@ export const loginUser = async (req, res, next) => {
       .select("+password")
       .populate("tenant");
     if (!user) return next(new ExpressError(400, "Invalid credentials"));
+    if (user.status === "suspended") return next(new ExpressError(403, "Account suspended"));
 
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) return next(new ExpressError(400, "Invalid credentials"));
@@ -81,13 +145,18 @@ export const loginUser = async (req, res, next) => {
     await user.save();
 
     const token = generateToken(user);
+    setAuthCookie(res, token);
+    await recordAuditLog({
+      tenantId: user.tenant._id,
+      actorId: user._id,
+      action: "auth.login",
+      entityType: "user",
+      entityId: user._id,
+      metadata: { role: user.role },
+    });
 
     res.json({
-      _id: user._id,
-      email: user.email,
-      role: user.role,
-      tenant: user.tenant,
-      token,
+      user: serializeAuthUser(user),
     });
   } catch (error) {
     console.error("Login error:", error);
@@ -96,8 +165,36 @@ export const loginUser = async (req, res, next) => {
 };
 
 export const currentOwner = async (req, res, next) => {
-  const user = await User.findById(req.user._id).populate("tenant", "name plan noteLimit");
-  console.log("current owner NotesAuth: ", user.username);
+  const user = await User.findById(req.user._id).populate("tenant", "name displayName plan noteLimit billing settings templates");
   if (!user) return next(new ExpressError(404, "User not found"));
-  res.json(user);
+  res.json(serializeAuthUser(user));
+};
+
+export const logoutUser = async (req, res) => {
+  if (req.user?.tenant?._id && req.user?._id) {
+    await recordAuditLog({
+      tenantId: req.user.tenant._id,
+      actorId: req.user._id,
+      action: "auth.logout",
+      entityType: "user",
+      entityId: req.user._id,
+    });
+  }
+
+  clearAuthCookie(res);
+  res.json({ message: "Logged out successfully" });
+};
+
+export const getInviteDetails = async (req, res, next) => {
+  const invite = await Invite.findOne({ token: req.params.token }).populate("tenant", "name displayName");
+  if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) {
+    return next(new ExpressError(404, "Invite link not found or expired"));
+  }
+
+  res.json({
+    email: invite.email,
+    role: invite.role,
+    tenant: invite.tenant,
+    expiresAt: invite.expiresAt,
+  });
 };
